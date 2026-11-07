@@ -14,7 +14,7 @@ rvsum reads the `vInfo`, optional `vPartition` and optional `vDisk` sheets in [R
 
 ## Install
 
-The current release is **1.3.0**. Binary and image names have used **rvsum** since 1.2.0; release **1.1.2 and earlier** still use `rvtools2vse`. See [migration](#migrating-from-rvtools2vse) and the [changelog](CHANGELOG.md).
+The current release is **1.4.0**. Binary and image names have used **rvsum** since 1.2.0; release **1.1.2 and earlier** still use `rvtools2vse`. See [migration](#migrating-from-rvtools2vse) and the [changelog](CHANGELOG.md).
 
 ### Release binaries
 
