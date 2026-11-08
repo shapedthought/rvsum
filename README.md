@@ -806,15 +806,25 @@ Open the file in a browser. It is one self-contained file: no internet connectio
 CDN, tracking, or JavaScript libraries are needed. It includes:
 
 - VM counts, provisioned and reported used capacity.
-- The image-level / agent-in-estimate / excluded-storage split, with a chart.
-- Capacity grouped by vCenter and by cluster (scoped to its vCenter and datacenter).
+- A coverage donut with image-level / agent-in-estimate / excluded non-VADP TB labels.
+- Stacked horizontal capacity bars per vCenter and per cluster (scoped to its
+  vCenter and datacenter). Clusters show the top 15 by coverage capacity plus
+  **Other**; full vCenter/cluster tables remain below each chart.
+- An action-category bar chart counting each actionable VM once, in its
+  highest-priority category. VMs without actions are not included.
 - The same customer action rows as `--action-report`, with a text filter, category
   selector and sortable column headings. All rows are readable without JavaScript.
+
+Charts are inline SVG generated in Rust: responsive, print-friendly and available
+without JavaScript, external fonts or new dependencies. Hover over segments or
+shortened placement labels for full SVG title tooltips. All inventory labels in
+charts (including tooltips) respect `--anonymize` and are HTML-escaped. Zero-capacity
+selections show explicit empty states.
 
 The coverage figures use the existing sizing rules, including shared-disk
 counting and your `--keep-rdm` / `--keep-independent` choices. **Excluded does not
 mean protected elsewhere**: those disks still need an agent or another method.
-The chart mixes in-estimate capacity with excluded **provisioned** capacity; it
+The donut and capacity bars mix in-estimate capacity with excluded **provisioned** capacity; it
 is not a repository-capacity calculation.
 
 The VM count includes all selected inventory VMs, even those wholly excluded
