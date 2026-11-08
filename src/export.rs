@@ -1,6 +1,11 @@
 //! `--export-parquet`: write the cleaned, joined per-VM and per-disk tables.
 
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::Path,
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use arrow_array::{ArrayRef, BooleanArray, Float64Array, RecordBatch, StringArray};
@@ -14,6 +19,7 @@ pub struct Options<'a> {
     pub anonymize: bool,
     pub keep_rdm: bool,
     pub keep_independent: bool,
+    pub preserve_dc: &'a HashSet<String>,
 }
 
 /// Writes `vms.parquet` and `disks.parquet` into `dir` (created if missing).
@@ -32,6 +38,7 @@ pub fn write(
             s.to_string()
         }
     };
+    let hide_dc = |s: &str| crate::dc_rename::hide_dc(s, opts.anonymize, opts.preserve_dc);
     let source = |key: &str| -> String {
         let name = key
             .split('#')
@@ -65,7 +72,7 @@ pub fn write(
         ])),
         vec![
             s(vms.iter().map(|v| source(&v.vm_key)).collect()),
-            s(vms.iter().map(|v| hide(&v.datacenter)).collect()),
+            s(vms.iter().map(|v| hide_dc(&v.datacenter)).collect()),
             s(vms.iter().map(|v| hide(&v.cluster)).collect()),
             s(vms.iter().map(|v| hide(&v.vm_name)).collect()),
             s(vms
@@ -114,7 +121,7 @@ pub fn write(
         ])),
         vec![
             s(disks.iter().map(|(d, _)| source(&d.vm_key)).collect()),
-            s(disks.iter().map(|(_, v)| hide(&v.datacenter)).collect()),
+            s(disks.iter().map(|(_, v)| hide_dc(&v.datacenter)).collect()),
             s(disks.iter().map(|(_, v)| hide(&v.cluster)).collect()),
             s(disks.iter().map(|(_, v)| hide(&v.vm_name)).collect()),
             s(disks.iter().map(|(d, _)| d.disk_label.clone()).collect()),

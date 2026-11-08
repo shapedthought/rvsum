@@ -35,6 +35,7 @@ rvsum reads the `vInfo`, optional `vPartition` and optional `vDisk` sheets in [R
 - [Output formats](#output-formats)
 - [Filtering and grouping](#filtering-and-grouping)
   - [Flatten and flatten-site](#flatten-and-flatten-site)
+  - [Datacenter rename](#datacenter-rename)
   - [Site maps](#site-maps)
 - [Podman workflow](#podman-workflow)
 - [Parsed workbook cache](#parsed-workbook-cache)
@@ -398,7 +399,7 @@ rvsum -D ./exports --dc-include "Dubai DC",AbuDhabi --cluster-exclude Lab --vm-e
 rvsum -D ./exports --dc-print
 ```
 
-Includes narrow the population first; excludes then remove matches. Filters and site maps always use the **real** names from the workbook, also with `--anonymize`; hashing happens afterwards, only on the reported datacenter, cluster and VM names (site-map group names and the `--flatten` labels are not hashed).
+Includes narrow the population first; excludes then remove matches. Filters and site maps always use the **real** names from the workbook, also with `--anonymize`. `--dc-rename` is applied after those filters, so include/exclude lists must use the original datacenter names. Hashing happens afterwards, only on the reported datacenter, cluster and VM names (site-map group names, `--dc-rename` display names and the `--flatten` labels are not hashed).
 
 ### Flatten and flatten-site
 
@@ -407,6 +408,30 @@ Includes narrow the population first; excludes then remove matches. Filters and 
 - `--flatten`: one grand-total row labelled `DC1` / `Cluster1`.
 
 Both flatten modes work with every summary format and `--summary-file`. If both flags are supplied together, **neither is applied**. If a site map is supplied, **both are ignored**.
+
+### Datacenter rename
+
+Use `--dc-rename FILE` to relabel datacenters in summaries and reports without changing the workbook. The file is a JSON object mapping each real datacenter name to a display name:
+
+```json
+{"prod-dc-a": "Dubai", "dr-dc": "Abu Dhabi"}
+```
+
+```sh
+rvsum -D ./exports --dc-rename dc-rename.json -s
+```
+
+Matching compares the trimmed datacenter name exactly. If no key matches exactly, a case-insensitive comparison is tried. Datacenters that are not listed keep their real names; nothing is dropped, and cluster names are left unchanged.
+
+Two datacenters mapped to the same display name merge into one site: each VM is counted once and capacities are summed once. The rename is applied after include/exclude filters (which always use the real names) and before grouping, so it works with the default summary, `--flatten-site`, `--flatten`, every `--format`, `--summary-file`, `--html-report`, `--action-report`, Parquet export and the legacy VSE export.
+
+A warning is printed to stderr for each map key that matches no datacenter remaining after filters.
+
+With `--anonymize`, names chosen in the rename map are shown as written and are not hashed. Unrenamed datacenters are still hashed, as are cluster, VM and other inventory names.
+
+`--dc-rename` cannot be combined with `--dc-site-map`. They are two ways of remapping datacenters, but they use different matching rules (exact / case-insensitive versus substring) and merge semantics (rename never drops unmatched datacenters; a site map can drop or double-count). Use one or the other.
+
+Invalid JSON, a missing file, a non-object document, a non-string value, an empty key or an empty display name is a clear error.
 
 ### Site maps
 
@@ -586,6 +611,9 @@ Usage: `rvsum [OPTIONS]`. The following entries reproduce **`rvsum --help` exact
       --flatten-site
           Flatten to single cluster per-site
 
+      --dc-rename <DC_RENAME>
+          Rename datacenters using a JSON object map (real name -> display name)
+
       --dc-site-map <DC_SITE_MAP>
           Map DCs to a site - requires a JSON file
 
@@ -676,7 +704,7 @@ The old Veeam Size Estimator (VSE) is defunct, but its export remains available 
 
 ## Known limitations
 
-- **Anonymization scope:** `--anonymize` hashes datacenter, cluster and VM names in the output, not every workbook/exception field (for example disk labels); do not treat it as a complete data-sanitization or security feature. To share the workbook itself, use [`rvsum anonymise`](#anonymise-an-export-before-sharing-it).
+- **Anonymization scope:** `--anonymize` hashes datacenter, cluster and VM names in the output, not every workbook/exception field (for example disk labels); do not treat it as a complete data-sanitization or security feature. Display names from `--dc-rename` stay unhashed, like site-map group names. To share the workbook itself, use [`rvsum anonymise`](#anonymise-an-export-before-sharing-it).
 - **Overlapping exports:** the same VM in two input files is counted twice. It is flagged as `duplicate_vm_name` with `same_uuid_in_multiple_records_check_overlapping_exports` when UUIDs are present. Duplicate *paths* are removed, not duplicate inventory records. Exports without UUID columns join by name, which is ambiguous when names repeat.
 - **Guest data quality:** missing/stale Tools or vPartition rows can make the vInfo fallback overestimate guest data. Missing vDisk metadata can prevent exclusions/deduplication. Partial exclusions and shared disks cannot be allocated precisely without usable guest data.
 - **Shared disks without UUIDs:** the disk-label-plus-size fallback is ambiguous and can merge unrelated disks. Shared allocation is deterministic by VM name, not by actual ownership or guest usage.
@@ -766,7 +794,7 @@ opts out of using it for sizing.
 
 `--anonymize` hashes VM, datacenter, cluster, host, peer and source-file names with
 the same function as other outputs (and also hashes affected disk labels). As in
-summaries, user-defined site-map group labels are retained. Without that flag the
+summaries, user-defined site-map group labels and `--dc-rename` display names are retained. Without that flag the
 report contains customer inventory: store/share it privately. No report format
 redacts OS descriptions, so review custom OS strings and your site labels before
 external sharing. CSV neutralizes leading spreadsheet-formula characters; XLSX
@@ -885,13 +913,14 @@ figures use 1,048,576 MiB (binary TiB), matching the other rvsum reports.
 vCenter is read from vInfo `VI SDK Server`, falling back to the VM's vDisk
 server when unambiguous. Missing/ambiguous placement is labelled **Unknown
 vCenter**, not guessed from the filename. Filters apply before reporting;
-capacity tables retain original inventory placement rather than flattening or
-site-map labels. The action table keeps the same site-map behaviour as the
-standalone action report.
+`--dc-rename` is applied to inventory datacenter names, so capacity tables
+show the chosen display names (and merge two datacenters mapped to the same
+name). Flatten and site-map labels are not used. The action table keeps the
+same `--dc-rename` and site-map behaviour as the standalone action report.
 
 Treat the HTML as sensitive inventory. `--anonymize` hides VM, host, vCenter,
 datacenter, cluster, disk and source-file identifiers, but capacity, OS details,
-relationships and user-supplied site-map labels can remain recognisable. It is
+relationships, user-supplied site-map labels and `--dc-rename` display names can remain recognisable. It is
 not a guarantee of anonymity. The parsed workbook cache still contains real
 identifiers; cache schema 4 rebuilds older entries once to retain provisioning
 metadata. Nothing is uploaded by the report.

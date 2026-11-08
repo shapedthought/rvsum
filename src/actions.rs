@@ -94,6 +94,7 @@ pub fn build(
             s.to_owned()
         }
     };
+    let hide_dc = |s: &str| crate::dc_rename::hide_dc(s, cli.anonymize, &cli.dc_rename_targets);
     let vm_by_key: HashMap<_, _> = vms.iter().map(|v| (v.vm_key.as_str(), v)).collect();
     let mut by_vm: HashMap<&str, Vec<&Vdisk>> = HashMap::new();
     let mut peers: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
@@ -223,7 +224,7 @@ pub fn build(
             vm_name: hide(&v.vm_name),
             datacenter: mapped
                 .map(|m| m.group_name.clone())
-                .unwrap_or_else(|| hide(&v.datacenter)),
+                .unwrap_or_else(|| hide_dc(&v.datacenter)),
             cluster: hide(&v.cluster),
             host: hide(&v.host),
             power_state: v.powerstate.clone(),

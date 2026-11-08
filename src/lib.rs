@@ -2,6 +2,7 @@
 
 mod actions;
 mod anonymise;
+mod dc_rename;
 mod disk;
 mod excel;
 mod export;
@@ -52,6 +53,11 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
+    let rename_map = match &cli.dc_rename {
+        Some(path) => Some(dc_rename::DcRename::load(path)?),
+        None => None,
+    };
+
     cli.rvtools_files =
         inputs::resolve_inputs(&cli.rvtools_files, &cli.rvtools_dir, cli.recursive)?;
     if !cli.rvtools_dir.is_empty() {
@@ -61,7 +67,12 @@ pub fn run() -> Result<()> {
             .for_each(|f| eprintln!("  {}", f.display()));
     }
 
-    let (info_vec, part_vec, disk_vec) = get_excel(&cli)?;
+    let (mut info_vec, part_vec, disk_vec) = get_excel(&cli)?;
+    if let Some(rename) = &rename_map {
+        rename.warn_unmatched(info_vec.iter().map(|v| v.datacenter.as_str()));
+        rename.apply(&mut info_vec);
+        cli.dc_rename_targets.clone_from(&rename.targets);
+    }
 
     let devisor = 1024_f64.powf(2.0);
 
@@ -125,6 +136,7 @@ pub fn run() -> Result<()> {
                 anonymize: cli.anonymize,
                 keep_rdm: cli.keep_rdm,
                 keep_independent: cli.keep_independent,
+                preserve_dc: &cli.dc_rename_targets,
             },
         )?;
         eprintln!(
@@ -310,12 +322,13 @@ pub fn run() -> Result<()> {
 
     if cli.anonymize {
         // Site maps and filters matched real names; hash the reported labels now.
-        // Site-map group names and the --flatten labels are user/tool labels, not inventory names.
+        // Site-map group names, --dc-rename display names and the --flatten labels
+        // are user/tool labels, not inventory names, so they stay unhashed.
         let flatten_site = cli.flatten_site && !cli.flatten && cli.dc_site_map.is_none();
         let flatten = cli.flatten && !cli.flatten_site && cli.dc_site_map.is_none();
         if cli.dc_site_map.is_none() && !flatten {
             datacenters.iter_mut().for_each(|d| {
-                d.name = anon(&d.name);
+                d.name = dc_rename::hide_dc(&d.name, true, &cli.dc_rename_targets);
                 d.cluster = if flatten_site {
                     format!("{}_cluster", d.name)
                 } else {
@@ -325,7 +338,7 @@ pub fn run() -> Result<()> {
         }
         combined.iter_mut().for_each(|v| {
             v.vm_name = anon(&v.vm_name);
-            v.datacenter = anon(&v.datacenter);
+            v.datacenter = dc_rename::hide_dc(&v.datacenter, true, &cli.dc_rename_targets);
             v.cluster = anon(&v.cluster);
         });
     }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--dc-rename FILE`: JSON object mapping real datacenter names to display names (exact match on the trimmed name, with a case-insensitive fallback). Unlisted datacenters keep their real names; two names mapped to the same display name merge without double-counting. Applied after include/exclude filters and before grouping, so it works with the default summary, flatten modes, every `--format`, `--summary-file`, `--html-report`, `--action-report`, Parquet and legacy VSE exports. Unmatched map keys warn on stderr. With `--anonymize`, chosen display names stay unhashed. Cannot be combined with `--dc-site-map`.
+
 ## [1.6.0] - 2026-11-08
 
 ### Added
