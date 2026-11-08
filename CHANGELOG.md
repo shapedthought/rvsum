@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Load and parse multiple RVTools files concurrently (up to four workbooks), retaining input order and per-file cache behaviour.
-
 ### Fixed
 - Column lookup no longer panics on an empty sheet; it returns a clear "Sheet is empty" error instead.
 - Column headers are matched ignoring leading/trailing whitespace, falling back to a case-insensitive match when no exact match exists; header matching no longer allocates per cell.
+
+### Changed
+- Load and parse multiple RVTools files concurrently (up to four workbooks), retaining input order and per-file cache behaviour.
 
 ## [1.4.0] - 2026-11-08
 
