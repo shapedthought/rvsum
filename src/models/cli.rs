@@ -80,7 +80,7 @@ pub struct Cli {
     #[clap(long, action, default_value_t = false)]
     pub legacy: bool,
 
-    /// Rename datacenters using a JSON object map (real name -> display name)
+    /// Rename datacenters using a JSON object (`{"real-dc": "Display"}` or `{"Display": ["real-dc-1", "real-dc-2"]}`)
     #[clap(long, value_parser, conflicts_with = "dc_site_map")]
     pub dc_rename: Option<PathBuf>,
 

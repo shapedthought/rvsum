@@ -38,8 +38,7 @@ impl DcRename {
         })?;
         let obj = value.as_object().ok_or_else(|| {
             MyError::DcRename(
-                "--dc-rename file must be a JSON object mapping datacenter names to display names"
-                    .into(),
+                "--dc-rename file must be a JSON object mapping names as strings or arrays".into(),
             )
         })?;
 
@@ -55,25 +54,55 @@ impl DcRename {
                     "--dc-rename map keys must not be empty".into(),
                 ));
             }
-            let Some(raw_target) = raw_value.as_str() else {
+            if let Some(raw_target) = raw_value.as_str() {
+                // {"real-dc": "Display"}
+                let target = raw_target.trim();
+                if target.is_empty() {
+                    return Err(MyError::DcRename(format!(
+                        "--dc-rename display name for key {key:?} must not be empty"
+                    )));
+                }
+                insert_mapping(
+                    &mut exact,
+                    &mut casefold,
+                    &mut keys,
+                    &mut targets,
+                    key.to_string(),
+                    target.to_string(),
+                )?;
+            } else if let Some(items) = raw_value.as_array() {
+                // {"Display": ["real-dc-1", "real-dc-2"]}
+                if items.is_empty() {
+                    return Err(MyError::DcRename(format!(
+                        "--dc-rename array for display name {key:?} must not be empty"
+                    )));
+                }
+                for item in items {
+                    let Some(raw_real) = item.as_str() else {
+                        return Err(MyError::DcRename(format!(
+                            "--dc-rename array for display name {key:?} must contain only strings"
+                        )));
+                    };
+                    let real = raw_real.trim();
+                    if real.is_empty() {
+                        return Err(MyError::DcRename(format!(
+                            "--dc-rename array for display name {key:?} must not contain empty names"
+                        )));
+                    }
+                    insert_mapping(
+                        &mut exact,
+                        &mut casefold,
+                        &mut keys,
+                        &mut targets,
+                        real.to_string(),
+                        key.to_string(),
+                    )?;
+                }
+            } else {
                 return Err(MyError::DcRename(format!(
-                    "--dc-rename value for key {key:?} must be a string"
-                )));
-            };
-            let target = raw_target.trim();
-            if target.is_empty() {
-                return Err(MyError::DcRename(format!(
-                    "--dc-rename display name for key {key:?} must not be empty"
+                    "--dc-rename value for key {key:?} must be a string or an array of strings"
                 )));
             }
-            let key = key.to_string();
-            let target = target.to_string();
-            exact.insert(key.clone(), target.clone());
-            casefold
-                .entry(key.to_ascii_lowercase())
-                .or_insert_with(|| target.clone());
-            keys.push(key);
-            targets.insert(target);
         }
 
         Ok(Self {
@@ -129,6 +158,31 @@ impl DcRename {
             eprintln!("warning: --dc-rename key {key:?} matches no datacenter in the inputs");
         }
     }
+}
+
+fn insert_mapping(
+    exact: &mut BTreeMap<String, String>,
+    casefold: &mut BTreeMap<String, String>,
+    keys: &mut Vec<String>,
+    targets: &mut HashSet<String>,
+    real: String,
+    display: String,
+) -> Result<(), MyError> {
+    if let Some(existing) = exact.get(&real) {
+        if existing != &display {
+            return Err(MyError::DcRename(format!(
+                "--dc-rename assigns {real:?} to both {existing:?} and {display:?}"
+            )));
+        }
+        return Ok(());
+    }
+    exact.insert(real.clone(), display.clone());
+    casefold
+        .entry(real.to_ascii_lowercase())
+        .or_insert_with(|| display.clone());
+    keys.push(real);
+    targets.insert(display);
+    Ok(())
 }
 
 /// Hash `name` when anonymizing, unless it is a `--dc-rename` display name.
@@ -251,7 +305,10 @@ mod tests {
     fn non_string_value_is_an_error() {
         let file = write_map(r#"{"prod-dc-a": 1}"#);
         let msg = DcRename::load(file.path()).unwrap_err().to_string();
-        assert!(msg.contains("must be a string"), "{msg}");
+        assert!(
+            msg.contains("must be a string or an array of strings"),
+            "{msg}"
+        );
         assert!(msg.contains("prod-dc-a"), "{msg}");
     }
 
@@ -267,6 +324,97 @@ mod tests {
         let file = write_map(r#"{"": "Dubai"}"#);
         let msg = DcRename::load(file.path()).unwrap_err().to_string();
         assert!(msg.contains("keys must not be empty"), "{msg}");
+    }
+
+    #[test]
+    fn array_form_maps_real_names_to_display_name() {
+        let file = write_map(r#"{"UAE": ["prod-dc-a", "dr-dc"]}"#);
+        let map = DcRename::load(file.path()).unwrap();
+        assert_eq!(map.mapped_name("prod-dc-a"), Some("UAE"));
+        assert_eq!(map.mapped_name("  dr-dc  "), Some("UAE"));
+        assert_eq!(map.mapped_name("PROD-DC-A"), Some("UAE"));
+        assert_eq!(map.mapped_name("lab-dc"), None);
+        assert!(map.targets.contains("UAE"));
+    }
+
+    #[test]
+    fn mixed_string_and_array_forms() {
+        let file = write_map(r#"{"prod-dc-a": "Dubai", "UAE": ["prod-dc-b", "dr-dc"]}"#);
+        let map = DcRename::load(file.path()).unwrap();
+        assert_eq!(map.mapped_name("prod-dc-a"), Some("Dubai"));
+        assert_eq!(map.mapped_name("prod-dc-b"), Some("UAE"));
+        assert_eq!(map.mapped_name("dr-dc"), Some("UAE"));
+    }
+
+    #[test]
+    fn array_form_trims_display_name_and_items() {
+        let file = write_map(r#"{ "  UAE  ": ["  prod-dc-a  ", "dr-dc"] }"#);
+        let map = DcRename::load(file.path()).unwrap();
+        assert_eq!(map.mapped_name("prod-dc-a"), Some("UAE"));
+        assert!(map.targets.contains("UAE"));
+    }
+
+    #[test]
+    fn duplicate_real_name_for_same_display_is_deduped() {
+        let file = write_map(r#"{"UAE": ["prod-dc-a", "prod-dc-a"], "prod-dc-a": "UAE"}"#);
+        let map = DcRename::load(file.path()).unwrap();
+        assert_eq!(map.mapped_name("prod-dc-a"), Some("UAE"));
+        assert_eq!(map.keys.iter().filter(|k| *k == "prod-dc-a").count(), 1);
+    }
+
+    #[test]
+    fn unmatched_warning_covers_array_items() {
+        let file = write_map(r#"{"UAE": ["prod-dc-a", "no-such-dc"]}"#);
+        let map = DcRename::load(file.path()).unwrap();
+        assert_eq!(
+            map.unmatched_keys(["prod-dc-a"].into_iter()),
+            vec!["no-such-dc".to_string()]
+        );
+        assert!(map
+            .unmatched_keys(["PROD-DC-A", "NO-SUCH-DC"].into_iter())
+            .is_empty());
+    }
+
+    #[test]
+    fn empty_array_is_an_error() {
+        let file = write_map(r#"{"UAE": []}"#);
+        let msg = DcRename::load(file.path()).unwrap_err().to_string();
+        assert!(msg.contains("must not be empty"), "{msg}");
+        assert!(msg.contains("UAE"), "{msg}");
+    }
+
+    #[test]
+    fn non_string_array_item_is_an_error() {
+        let file = write_map(r#"{"UAE": ["prod-dc-a", 1]}"#);
+        let msg = DcRename::load(file.path()).unwrap_err().to_string();
+        assert!(msg.contains("must contain only strings"), "{msg}");
+        assert!(msg.contains("UAE"), "{msg}");
+    }
+
+    #[test]
+    fn empty_array_item_is_an_error() {
+        let file = write_map(r#"{"UAE": ["  "]}"#);
+        let msg = DcRename::load(file.path()).unwrap_err().to_string();
+        assert!(msg.contains("must not contain empty names"), "{msg}");
+    }
+
+    #[test]
+    fn conflicting_display_names_are_an_error() {
+        let file = write_map(r#"{"prod-dc-a": "Dubai", "UAE": ["prod-dc-a"]}"#);
+        let msg = DcRename::load(file.path()).unwrap_err().to_string();
+        assert!(msg.contains("assigns"), "{msg}");
+        assert!(msg.contains("prod-dc-a"), "{msg}");
+        assert!(msg.contains("Dubai"), "{msg}");
+        assert!(msg.contains("UAE"), "{msg}");
+    }
+
+    #[test]
+    fn conflicting_array_entries_are_an_error() {
+        let file = write_map(r#"{"Dubai": ["prod-dc-a"], "UAE": ["prod-dc-a"]}"#);
+        let msg = DcRename::load(file.path()).unwrap_err().to_string();
+        assert!(msg.contains("prod-dc-a"), "{msg}");
+        assert!(msg.contains("Dubai"), "{msg}");
+        assert!(msg.contains("UAE"), "{msg}");
     }
 
     #[test]

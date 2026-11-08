@@ -298,7 +298,10 @@ fn non_string_value_is_a_clear_error() {
     let map = write_map(&dir, "bad.json", r#"{"DC-A": 12}"#);
     let (ok, _, stderr) = run(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap(), "-s"]);
     assert!(!ok);
-    assert!(stderr.contains("must be a string"), "{stderr}");
+    assert!(
+        stderr.contains("must be a string or an array of strings"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -331,4 +334,89 @@ fn rejects_combination_with_site_map() {
     assert!(!ok);
     assert!(stderr.contains("--dc-rename"), "{stderr}");
     assert!(stderr.contains("--dc-site-map"), "{stderr}");
+}
+
+#[test]
+fn array_form_merges_without_double_counting() {
+    let dir = TempDir::new().unwrap();
+    let map = write_map(&dir, "rename.json", r#"{"UAE": ["DC-A", "DC-B"]}"#);
+    let path = map.to_str().unwrap();
+    assert_eq!(totals(&["-r", BASELINE, "--dc-rename", path]), (3.75, 4));
+    let (ok, stdout, _) = csv(&["-r", BASELINE, "--dc-rename", path]);
+    assert!(ok, "{stdout}");
+    assert!(stdout.contains("UAE,CL1,1.00,2"), "{stdout}");
+    assert!(stdout.contains("UAE,CL2,2.00,1"), "{stdout}");
+    assert!(stdout.contains("UAE,CL3,0.75,1"), "{stdout}");
+    assert!(!stdout.contains("DC-A,"), "{stdout}");
+    assert!(!stdout.contains("DC-B,"), "{stdout}");
+
+    let (ok, stdout, _) = csv(&["-r", BASELINE, "--dc-rename", path, "--flatten-site"]);
+    assert!(ok, "{stdout}");
+    assert!(stdout.contains("UAE,UAE_cluster,3.75,4"), "{stdout}");
+}
+
+#[test]
+fn mixed_forms_in_one_file() {
+    let dir = TempDir::new().unwrap();
+    let map = write_map(
+        &dir,
+        "rename.json",
+        r#"{"DC-A": "Dubai", "Abu Dhabi": ["DC-B"]}"#,
+    );
+    let (ok, stdout, _) = csv(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap()]);
+    assert!(ok, "{stdout}");
+    assert!(stdout.contains("Dubai,"), "{stdout}");
+    assert!(stdout.contains("Abu Dhabi,"), "{stdout}");
+    assert!(!stdout.contains("DC-A,"), "{stdout}");
+    assert!(!stdout.contains("DC-B,"), "{stdout}");
+    assert_eq!(
+        totals(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap()]),
+        (3.75, 4)
+    );
+}
+
+#[test]
+fn unmatched_array_item_warns() {
+    let dir = TempDir::new().unwrap();
+    let map = write_map(&dir, "rename.json", r#"{"UAE": ["DC-A", "no-such-dc"]}"#);
+    let (ok, stdout, stderr) = csv(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap()]);
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains(
+            "warning: --dc-rename key \"no-such-dc\" matches no datacenter in the inputs"
+        ),
+        "{stderr}"
+    );
+    assert!(stdout.contains("UAE,"), "{stdout}");
+    assert!(stdout.contains("DC-B,"), "{stdout}");
+}
+
+#[test]
+fn conflicting_assignments_are_a_clear_error() {
+    let dir = TempDir::new().unwrap();
+    let map = write_map(&dir, "bad.json", r#"{"DC-A": "Dubai", "UAE": ["DC-A"]}"#);
+    let (ok, _, stderr) = run(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap(), "-s"]);
+    assert!(!ok);
+    assert!(stderr.contains("Datacenter rename error"), "{stderr}");
+    assert!(stderr.contains("DC-A"), "{stderr}");
+    assert!(stderr.contains("Dubai"), "{stderr}");
+    assert!(stderr.contains("UAE"), "{stderr}");
+}
+
+#[test]
+fn empty_array_is_a_clear_error() {
+    let dir = TempDir::new().unwrap();
+    let map = write_map(&dir, "bad.json", r#"{"UAE": []}"#);
+    let (ok, _, stderr) = run(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap(), "-s"]);
+    assert!(!ok);
+    assert!(stderr.contains("must not be empty"), "{stderr}");
+}
+
+#[test]
+fn non_string_array_item_is_a_clear_error() {
+    let dir = TempDir::new().unwrap();
+    let map = write_map(&dir, "bad.json", r#"{"UAE": ["DC-A", 12]}"#);
+    let (ok, _, stderr) = run(&["-r", BASELINE, "--dc-rename", map.to_str().unwrap(), "-s"]);
+    assert!(!ok);
+    assert!(stderr.contains("must contain only strings"), "{stderr}");
 }

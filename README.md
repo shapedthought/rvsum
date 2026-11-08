@@ -411,11 +411,21 @@ Both flatten modes work with every summary format and `--summary-file`. If both 
 
 ### Datacenter rename
 
-Use `--dc-rename FILE` to relabel datacenters in summaries and reports without changing the workbook. The file is a JSON object mapping each real datacenter name to a display name:
+Use `--dc-rename FILE` to relabel datacenters in summaries and reports without changing the workbook. The file is a JSON object. It accepts two entry forms, which can be mixed in one file.
+
+**String value** — the key is the real datacenter name and the value is the display name:
 
 ```json
 {"prod-dc-a": "Dubai", "dr-dc": "Abu Dhabi"}
 ```
+
+**Array value** — the key is the display name and the value is the list of real datacenter names that all receive that display name (and therefore merge):
+
+```json
+{"UAE": ["prod-dc-a", "prod-dc-b"], "Abu Dhabi": ["dr-dc"]}
+```
+
+The two forms point in opposite directions: a string maps *from* a real name *to* a display name, while an array maps *from* a display name *to* the real names it covers.
 
 ```sh
 rvsum -D ./exports --dc-rename dc-rename.json -s
@@ -425,13 +435,13 @@ Matching compares the trimmed datacenter name exactly. If no key matches exactly
 
 Two datacenters mapped to the same display name merge into one site: each VM is counted once and capacities are summed once. The rename is applied after include/exclude filters (which always use the real names) and before grouping, so it works with the default summary, `--flatten-site`, `--flatten`, every `--format`, `--summary-file`, `--html-report`, `--action-report`, Parquet export and the legacy VSE export.
 
-A warning is printed to stderr for each map key that matches no datacenter remaining after filters.
+A warning is printed to stderr for each real datacenter name in the map (a string-form key or an array item) that matches no datacenter remaining after filters.
 
 With `--anonymize`, names chosen in the rename map are shown as written and are not hashed. Unrenamed datacenters are still hashed, as are cluster, VM and other inventory names.
 
 `--dc-rename` cannot be combined with `--dc-site-map`. They are two ways of remapping datacenters, but they use different matching rules (exact / case-insensitive versus substring) and merge semantics (rename never drops unmatched datacenters; a site map can drop or double-count). Use one or the other.
 
-Invalid JSON, a missing file, a non-object document, a non-string value, an empty key or an empty display name is a clear error.
+Invalid JSON, a missing file, a non-object document, a value that is neither a string nor an array of strings, an empty array, an empty name, or the same real datacenter assigned to two different display names is a clear error. Listing the same real name twice for the same display name is fine.
 
 ### Site maps
 
@@ -612,7 +622,7 @@ Usage: `rvsum [OPTIONS]`. The following entries reproduce **`rvsum --help` exact
           Flatten to single cluster per-site
 
       --dc-rename <DC_RENAME>
-          Rename datacenters using a JSON object map (real name -> display name)
+          Rename datacenters using a JSON object (`{"real-dc": "Display"}` or `{"Display": ["real-dc-1", "real-dc-2"]}`)
 
       --dc-site-map <DC_SITE_MAP>
           Map DCs to a site - requires a JSON file
