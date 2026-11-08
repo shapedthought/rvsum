@@ -5,6 +5,7 @@ mod disk;
 mod excel;
 mod export;
 mod helpers;
+mod html;
 mod inputs;
 mod models;
 mod plot;
@@ -127,11 +128,17 @@ pub fn run() -> Result<()> {
             disks.display()
         );
     }
-    if let Some(path) = &cli.action_report {
+    if cli.action_report.is_some() || cli.html_report.is_some() {
         let rows = actions::build(&info_vec, &guest_parts, &disk_vec, &cli)?;
-        actions::write(path, &rows)?;
-        actions::print_summary(&rows);
-        eprintln!("Customer action report written to: {}", path.display());
+        if let Some(path) = &cli.action_report {
+            actions::write(path, &rows)?;
+            actions::print_summary(&rows);
+            eprintln!("Customer action report written to: {}", path.display());
+        }
+        if let Some(path) = &cli.html_report {
+            html::write(path, &info_vec, &disk_vec, &awareness, &rows, &cli)?;
+            eprintln!("HTML report written to: {}", path.display());
+        }
     }
     if cli.anonymize {
         // Filters and joins above used real names; hash only what is reported.

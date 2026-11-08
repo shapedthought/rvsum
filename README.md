@@ -563,6 +563,9 @@ Usage: `rvsum [OPTIONS]`. The following entries reproduce **`rvsum --help` exact
       --summary-file <SUMMARY_FILE>
           Write the --show-info summary to a file instead of stdout (implies --show-info)
 
+      --html-report <HTML_REPORT>
+          Write a self-contained offline HTML capacity, coverage and customer action report
+
       --action-report <ACTION_REPORT>
           Write one customer action row per VM (.csv, .json, .md or .xlsx)
 
@@ -726,3 +729,50 @@ extension is an error. XLSX contains a Summary sheet and one sheet per category,
 with filters and frozen headers. CSV/JSON/Markdown are one table/list sorted by
 priority, placement and VM. stderr prints category VM counts without polluting
 stdout. Empty reports still contain headers (or an empty JSON array).
+
+
+## Share an offline HTML report
+
+```sh
+rvsum -D ./exports --html-report customer-report.html
+# Hide inventory identifiers before sharing outside your organisation:
+rvsum -D ./exports --html-report customer-report.html --anonymize
+```
+
+Open the file in a browser. It is one self-contained file: no internet connection,
+CDN, tracking, or JavaScript libraries are needed. It includes:
+
+- VM counts, provisioned and reported used capacity.
+- The image-level / agent-in-estimate / excluded-storage split, with a chart.
+- Capacity grouped by vCenter and by cluster (scoped to its vCenter and datacenter).
+- The same customer action rows as `--action-report`, with a text filter, category
+  selector and sortable column headings. All rows are readable without JavaScript.
+
+The coverage figures use the existing sizing rules, including shared-disk
+counting and your `--keep-rdm` / `--keep-independent` choices. **Excluded does not
+mean protected elsewhere**: those disks still need an agent or another method.
+The chart mixes in-estimate capacity with excluded **provisioned** capacity; it
+is not a repository-capacity calculation.
+
+The VM count includes all selected inventory VMs, even those wholly excluded
+from the estimate. Reported used capacity comes from vInfo `In Use MiB` (or
+legacy `In Use MB`), not the guest file-system figure. Provisioned comes from
+vInfo `Provisioned MiB` / `Provisioned MB`, falling back to attached vDisk
+capacity. When neither exists, the report marks the total as incomplete rather
+than guessing. Provisioned is an inventory total, so shared attachments can
+appear on more than one VM; it is not the deduplicated coverage total. All TB
+figures use 1,048,576 MiB (binary TiB), matching the other rvsum reports.
+
+vCenter is read from vInfo `VI SDK Server`, falling back to the VM's vDisk
+server when unambiguous. Missing/ambiguous placement is labelled **Unknown
+vCenter**, not guessed from the filename. Filters apply before reporting;
+capacity tables retain original inventory placement rather than flattening or
+site-map labels. The action table keeps the same site-map behaviour as the
+standalone action report.
+
+Treat the HTML as sensitive inventory. `--anonymize` hides VM, host, vCenter,
+datacenter, cluster, disk and source-file identifiers, but capacity, OS details,
+relationships and user-supplied site-map labels can remain recognisable. It is
+not a guarantee of anonymity. The parsed workbook cache still contains real
+identifiers; cache schema 4 rebuilds older entries once to retain provisioning
+metadata. Nothing is uploaded by the report.

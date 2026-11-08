@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--html-report FILE`: one offline HTML file with inventory totals, coverage chart, vCenter/cluster capacity tables and filterable/sortable customer actions; supports `--anonymize` without external assets or new dependencies.
+- Optional vInfo provisioning and vCenter metadata for reports; cache schema 4 rebuilds old entries to preserve provisioning columns.
+
 ### Fixed
 - Column lookup no longer panics on an empty sheet; it returns a clear "Sheet is empty" error instead.
 - Column headers are matched ignoring leading/trailing whitespace, falling back to a case-insensitive match when no exact match exists; header matching no longer allocates per cell.
