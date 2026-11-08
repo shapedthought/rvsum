@@ -19,4 +19,6 @@ pub enum MyError {
     VpartitionError(String),
     #[error("RvTools selection error: {0}")]
     RvtoolsError(String),
+    #[error("Datacenter rename error: {0}")]
+    DcRename(String),
 }

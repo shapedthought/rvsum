@@ -263,6 +263,7 @@ pub fn write(
             s.to_owned()
         }
     };
+    let hide_dc = |s: &str| crate::dc_rename::hide_dc(s, cli.anonymize, &cli.dc_rename_targets);
     let mut attached: HashMap<&str, f64> = HashMap::new();
     let mut disk_centers: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     for d in disks {
@@ -318,7 +319,7 @@ pub fn write(
         };
         centers.entry(vec![vc.clone()]).or_default().add(&t);
         clusters
-            .entry(vec![vc, hide(&v.datacenter), hide(&v.cluster)])
+            .entry(vec![vc, hide_dc(&v.datacenter), hide(&v.cluster)])
             .or_default()
             .add(&t);
         total.add(&t);
@@ -356,7 +357,7 @@ pub fn write(
     if total.unknown > 0 {
         write!(out, "<p class=note>* Provisioned capacity unavailable for {} VM(s); shown totals include known capacity only.</p>", total.unknown).unwrap();
     }
-    write!(out, "<p class=note>Options: powered-off VMs {}; physical RDMs {}; independent disks {}; guest partition sizing {}. Inventory respects selection filters. Grouping below uses original inventory placement, not flatten/site-map labels.</p>",
+    write!(out, "<p class=note>Options: powered-off VMs {}; physical RDMs {}; independent disks {}; guest partition sizing {}. Inventory respects selection filters. Grouping below uses inventory placement after any --dc-rename, not flatten/site-map labels.</p>",
         if cli.include_powered_off { "included" } else { "excluded" },
         if cli.keep_rdm { "kept" } else { "excluded" }, if cli.keep_independent { "kept" } else { "excluded" },
         if cli.do_not_use_vpartition { "disabled" } else { "enabled" }).unwrap();

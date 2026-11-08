@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -78,6 +79,14 @@ pub struct Cli {
     /// Legacy mode - pre v4.1.2
     #[clap(long, action, default_value_t = false)]
     pub legacy: bool,
+
+    /// Rename datacenters using a JSON object (`{"real-dc": "Display"}` or `{"Display": ["real-dc-1", "real-dc-2"]}`)
+    #[clap(long, value_parser, conflicts_with = "dc_site_map")]
+    pub dc_rename: Option<PathBuf>,
+
+    /// Display names produced by `--dc-rename`; kept unhashed under `--anonymize`.
+    #[clap(skip)]
+    pub dc_rename_targets: HashSet<String>,
 
     /// Map DCs to a site - requires a JSON file
     #[clap(long, value_parser)]
