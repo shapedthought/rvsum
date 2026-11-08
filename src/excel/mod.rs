@@ -22,11 +22,69 @@ pub fn get_excel(cli: &Cli) -> Result<ExcelSheets, MyError> {
         ));
     }
 
-    let mut info_vec: Vec<Vinfo> = Vec::new();
-    let mut part_vec: Vec<Vpartition> = Vec::new();
-    let mut disk_vec: Vec<Vdisk> = Vec::new();
+    // Cached workbooks are memory/allocation-bound: concurrent loads cost more
+    // than they save. Only this scheduling decision uses the cheap cache hint;
+    // cache::load still performs all normal validation and rebuilding.
+    let warm = !cli.no_cache
+        && !cli.refresh_cache
+        && cli.rvtools_files.iter().all(|f| cache::has_candidate(f));
+    let workers = if warm {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .min(4)
+    };
+    let results = parse_files(cli, workers);
+    let (mut infos, mut parts, mut disks) = (Vec::new(), Vec::new(), Vec::new());
+    // Joining and flattening in input order also makes the first error deterministic.
+    for result in results {
+        let (i, p, d) = result?;
+        infos.extend(i);
+        parts.extend(p);
+        disks.extend(d);
+    }
+    Ok((infos, parts, disks))
+}
 
-    for (i, file) in cli.rvtools_files.iter().enumerate() {
+fn parse_files(cli: &Cli, workers: usize) -> Vec<Result<ExcelSheets, MyError>> {
+    if workers <= 1 || cli.rvtools_files.len() <= 1 {
+        return cli
+            .rvtools_files
+            .iter()
+            .enumerate()
+            .map(|(i, file)| parse_file(cli, i, file))
+            .collect();
+    }
+    // Cap concurrent workbooks to limit peak memory. The same path may appear more
+    // than once: cache writes are atomic, and every task retains its input index.
+    cli.rvtools_files
+        .chunks(workers.max(1))
+        .enumerate()
+        .flat_map(|(batch, files)| {
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = files
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, file)| {
+                        scope.spawn(move || parse_file(cli, batch * workers.max(1) + offset, file))
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().expect("RVTools parser thread panicked"))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect()
+}
+
+fn parse_file(cli: &Cli, i: usize, file: &std::path::Path) -> Result<ExcelSheets, MyError> {
+    let mut info_vec = Vec::new();
+    let mut part_vec = Vec::new();
+    let mut disk_vec = Vec::new();
+    {
         let mut excel = cache::load(file, cli.no_cache, cli.refresh_cache, cli.verbose)?;
         let workbook = match excel.worksheet_range("vInfo") {
             Ok(range) => range,
@@ -220,9 +278,9 @@ pub fn get_excel(cli: &Cli) -> Result<ExcelSheets, MyError> {
                 let part_power_column = partition.get_col_pos("Powerstate").ok();
                 if part_power_column.is_none() {
                     eprintln!(
-                        "vPartition in {:?} has no Powerstate column; using vInfo power state via the VM join.",
-                        cli.rvtools_files[i]
-                    );
+                            "vPartition in {:?} has no Powerstate column; using vInfo power state via the VM join.",
+                            cli.rvtools_files[i]
+                        );
                 }
 
                 let consumed_string = if cli.legacy {
@@ -313,9 +371,9 @@ pub fn get_excel(cli: &Cli) -> Result<ExcelSheets, MyError> {
                 let disk_mode_column = disk.get_col_pos("Raw Comp. Mode").ok();
                 if disk_mode_column.is_none() {
                     eprintln!(
-                        "vDisk in {:?} has no 'Raw Comp. Mode' column; physical RDMs cannot be detected.",
-                        cli.rvtools_files[i]
-                    );
+                            "vDisk in {:?} has no 'Raw Comp. Mode' column; physical RDMs cannot be detected.",
+                            cli.rvtools_files[i]
+                        );
                 }
                 let disk_label_column = disk.get_col_pos("Disk").ok();
                 let disk_power_column = disk.get_col_pos("Powerstate").ok();
@@ -417,7 +475,6 @@ pub fn get_excel(cli: &Cli) -> Result<ExcelSheets, MyError> {
             }
         }
     }
-
     Ok((info_vec, part_vec, disk_vec))
 }
 
@@ -539,5 +596,57 @@ impl JoinIndex {
             return unmatched();
         }
         self.name.get(name).cloned().unwrap_or_else(unmatched)
+    }
+}
+
+#[cfg(test)]
+mod parallel_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parallel_matches_sequential_including_identities_and_order() {
+        for flags in [vec!["--no-cache"], vec!["--refresh-cache"], vec![]] {
+            let mut args = vec![
+                "rvsum",
+                "-r",
+                "testdata/regression_uuid_b.xlsx",
+                "-r",
+                "testdata/regression_uuid_a.xlsx",
+                "-r",
+                "testdata/regression_coverage.xlsx",
+                "-r",
+                "testdata/regression_uuid_b.xlsx",
+                "-r",
+                "testdata/regression_baseline.xlsx",
+            ];
+            args.extend(flags);
+            let cli = Cli::parse_from(args);
+            let sequential = parse_files(&cli, 1);
+            let parallel = parse_files(&cli, 3);
+            // Debug includes serde-skipped identity/coverage fields as well as rows.
+            assert_eq!(format!("{sequential:?}"), format!("{parallel:?}"));
+            assert!(parallel.iter().all(Result::is_ok));
+            // The duplicate input shares a batch here, exercising atomic writes.
+            assert_eq!(
+                format!("{sequential:?}"),
+                format!("{:?}", parse_files(&cli, 4))
+            );
+        }
+    }
+
+    #[test]
+    fn errors_stay_in_input_order() {
+        let cli = Cli::parse_from([
+            "rvsum",
+            "-r",
+            "missing-first.xlsx",
+            "-r",
+            "missing-second.xlsx",
+        ]);
+        assert_eq!(
+            format!("{:?}", parse_files(&cli, 1)),
+            format!("{:?}", parse_files(&cli, 2))
+        );
     }
 }

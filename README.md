@@ -451,6 +451,8 @@ podman run --rm -v "$PWD":/data rvsum-bench --warmup 1 \
   'rvsum -r /data/*.xlsx -s'
 ```
 
+When you supply several uncached workbooks (or use `--no-cache` / `--refresh-cache`), rvsum loads and parses them concurrently, up to four at a time and limited by available CPU parallelism. Results retain input order. A single workbook stays on the direct path. If cache files already exist for every input, normal runs load sequentially: benchmarks showed concurrent cached loads were slower. Cache files are still fully validated; a stale or corrupt candidate is rebuilt normally, but may use the sequential path on that run. Cache controls work as before; verbose messages may arrive in completion order. Parallel loading can use more memory than loading files one at a time.
+
 For a per-file breakdown, run once with `--verbose`; each workbook prints `Loaded <file> in <ms> ms (cache hit|miss|refresh|bypass)`:
 
 ```bash
