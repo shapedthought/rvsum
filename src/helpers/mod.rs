@@ -8,17 +8,22 @@ pub trait ColPosition {
 
 impl ColPosition for Range<Data> {
     fn get_col_pos(&self, col_name: &str) -> Result<usize, MyError> {
-        let data_type = &self.rows().next().unwrap();
+        let header = self.rows().next().ok_or_else(|| {
+            MyError::EmptySheet(format!(
+                "no header row while looking for column: {col_name}"
+            ))
+        })?;
+        let wanted = col_name.trim();
 
-        let pos = data_type
+        header
             .iter()
-            .position(|x| x == &Data::String(col_name.to_string()));
-
-        if let Some(p) = pos {
-            Ok(p)
-        } else {
-            Err(MyError::ColumnPosition(col_name.to_string()))
-        }
+            .position(|x| matches!(x, Data::String(s) if s.trim() == wanted))
+            .or_else(|| {
+                header.iter().position(
+                    |x| matches!(x, Data::String(s) if s.trim().eq_ignore_ascii_case(wanted)),
+                )
+            })
+            .ok_or_else(|| MyError::ColumnPosition(col_name.to_string()))
     }
 }
 
@@ -112,4 +117,47 @@ pub fn is_container_mount(mount: &str) -> bool {
         || PREFIXES
             .iter()
             .any(|p| m == *p || m.starts_with(&format!("{p}/")))
+}
+
+#[cfg(test)]
+mod col_position_tests {
+    use super::*;
+
+    fn header(cols: &[&str]) -> Range<Data> {
+        let mut r = Range::new((0, 0), (1, cols.len() as u32 - 1));
+        for (i, c) in cols.iter().enumerate() {
+            r.set_value((0, i as u32), Data::String(c.to_string()));
+        }
+        r
+    }
+
+    #[test]
+    fn empty_range_errors() {
+        let r: Range<Data> = Range::empty();
+        assert!(matches!(r.get_col_pos("VM"), Err(MyError::EmptySheet(_))));
+    }
+
+    #[test]
+    fn whitespace_header_found() {
+        let r = header(&["Powerstate", "  VM ", "Host"]);
+        assert_eq!(r.get_col_pos("VM").unwrap(), 1);
+    }
+
+    #[test]
+    fn case_different_header_found() {
+        let r = header(&["Powerstate", "Provisioned MiB"]);
+        assert_eq!(r.get_col_pos("provisioned mib").unwrap(), 1);
+    }
+
+    #[test]
+    fn exact_match_preferred_over_case_insensitive() {
+        let r = header(&["vm", "VM"]);
+        assert_eq!(r.get_col_pos("VM").unwrap(), 1);
+    }
+
+    #[test]
+    fn missing_column_errors() {
+        let r = header(&["Powerstate", "Host"]);
+        assert!(matches!(r.get_col_pos("VM"), Err(MyError::ColumnPosition(c)) if c == "VM"));
+    }
 }
