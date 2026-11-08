@@ -451,6 +451,8 @@ podman run --rm -v "$PWD":/data rvsum-bench --warmup 1 \
   'rvsum -r /data/*.xlsx -s'
 ```
 
+When you supply several workbooks, rvsum loads and parses them concurrently (up to four at a time, limited by available CPU parallelism). Results retain input order. A single workbook stays on the direct path. Cache controls work as before; verbose messages may arrive in completion order. This can use more memory than loading files one at a time.
+
 For a per-file breakdown, run once with `--verbose`; each workbook prints `Loaded <file> in <ms> ms (cache hit|miss|refresh|bypass)`:
 
 ```bash
