@@ -111,6 +111,15 @@ fn parse_file(cli: &Cli, i: usize, file: &std::path::Path) -> Result<ExcelSheets
         let cluster_column = workbook.get_col_pos("Cluster")?;
 
         let host_column = find_col(&workbook, &["Host"]);
+        let vcenter_column = find_col(&workbook, &["VI SDK Server"]);
+        let provisioned_column = find_col(
+            &workbook,
+            &[if cli.legacy {
+                "Provisioned MB"
+            } else {
+                "Provisioned MiB"
+            }],
+        );
         let os_columns: Vec<_> = [
             "OS according to the VMware Tools",
             "OS according to the configuration file",
@@ -164,6 +173,16 @@ fn parse_file(cli: &Cli, i: usize, file: &std::path::Path) -> Result<ExcelSheets
             });
 
             file_info.push(Vinfo {
+                vcenter: vcenter_column
+                    .map(|c| clean_text(&row.1[c]))
+                    .unwrap_or_default(),
+                provisioned: provisioned_column
+                    .and_then(|c| {
+                        row.1[c]
+                            .get_float_value("vInfo provisioned capacity".into(), row.0 + 1)
+                            .ok()
+                    })
+                    .filter(|n| n.is_finite() && *n >= 0.0),
                 vm_name: vm_name.to_string(),
                 datacenter: dc.to_string(),
                 cluster: cluster.to_string(),

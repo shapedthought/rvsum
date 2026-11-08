@@ -443,6 +443,8 @@ fn apply_inner(
             }
         }
         combined.push(Vinfo {
+            vcenter: info.vcenter.clone(),
+            provisioned: info.provisioned,
             vm_name: info.vm_name.clone(),
             datacenter: info.datacenter.clone(),
             cluster: info.cluster.clone(),
@@ -926,6 +928,8 @@ mod tests {
 
     fn info(name: &str, cap: f64) -> Vinfo {
         Vinfo {
+            vcenter: String::new(),
+            provisioned: None,
             vm_name: name.into(),
             datacenter: "DC".into(),
             cluster: "CL".into(),

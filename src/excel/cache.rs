@@ -10,7 +10,7 @@ use std::{
 };
 
 // Bump whenever the selected columns or their interpretation changes.
-const SCHEMA: u32 = 3;
+const SCHEMA: u32 = 4;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAGIC: &[u8] = b"RVSUMCACHE\x01";
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -131,6 +131,8 @@ fn project(range: Range<Data>) -> Range<Data> {
         "Powerstate",
         "In Use MB",
         "In Use MiB",
+        "Provisioned MiB",
+        "Provisioned MB",
         "Datacenter",
         "Cluster",
         "Tools",

@@ -19,12 +19,12 @@ use crate::{
     },
 };
 
-const CATEGORIES: [&str; 3] = [
+pub(crate) const CATEGORIES: [&str; 3] = [
     "Not protected by image-level backup",
     "Fix before backup",
     "Check with customer",
 ];
-const HEADERS: [&str; 16] = [
+pub(crate) const HEADERS: [&str; 16] = [
     "category",
     "vm_name",
     "datacenter",
@@ -283,7 +283,7 @@ pub fn build(
     Ok(rows)
 }
 
-fn fields(row: &Action) -> Result<Vec<String>> {
+pub(crate) fn fields(row: &Action) -> Result<Vec<String>> {
     let obj = serde_json::to_value(row)?;
     Ok(HEADERS
         .iter()

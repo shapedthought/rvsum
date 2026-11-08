@@ -2,6 +2,11 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Vinfo {
+    /// Optional inventory placement and provisioned capacity for offline reporting.
+    #[serde(skip)]
+    pub vcenter: String,
+    #[serde(skip)]
+    pub provisioned: Option<f64>,
     pub vm_name: String,
     pub datacenter: String,
     pub cluster: String,
