@@ -22,10 +22,20 @@ pub fn get_excel(cli: &Cli) -> Result<ExcelSheets, MyError> {
         ));
     }
 
-    let workers = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-        .min(4);
+    // Cached workbooks are memory/allocation-bound: concurrent loads cost more
+    // than they save. Only this scheduling decision uses the cheap cache hint;
+    // cache::load still performs all normal validation and rebuilding.
+    let warm = !cli.no_cache
+        && !cli.refresh_cache
+        && cli.rvtools_files.iter().all(|f| cache::has_candidate(f));
+    let workers = if warm {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .min(4)
+    };
     let results = parse_files(cli, workers);
     let (mut infos, mut parts, mut disks) = (Vec::new(), Vec::new(), Vec::new());
     // Joining and flattening in input order also makes the first error deterministic.

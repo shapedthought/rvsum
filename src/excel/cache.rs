@@ -251,6 +251,15 @@ fn write(path: &Path, bytes: &[u8], create_parent: bool) -> std::io::Result<()> 
     Ok(())
 }
 
+/// Scheduling hint only: load() still validates every byte, fingerprint and
+/// schema. A stale/corrupt candidate merely takes the sequential path once.
+pub(super) fn has_candidate(path: &Path) -> bool {
+    sidecar(path).is_some_and(|p| p.is_file())
+        || Fingerprint::read(path)
+            .and_then(|f| fallback(&f))
+            .is_some_and(|p| p.is_file())
+}
+
 pub(super) fn load(
     path: &Path,
     no_cache: bool,
