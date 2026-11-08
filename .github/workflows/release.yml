@@ -18,6 +18,8 @@ jobs:
   build-binaries:
     name: binary (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    env:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +73,49 @@ jobs:
           DEST="${{ matrix.asset }}"
           cp "$SRC" "$DEST"
           strip "$DEST" || true
+
+      # Signs and notarises macOS binaries with a Developer ID certificate.
+      # Skipped (unsigned build, as before) when the secrets are not set.
+      - name: Sign and notarise (macOS)
+        if: runner.os == 'macOS' && env.MACOS_CERT_P12_BASE64 != ''
+        shell: bash
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          DEST="${{ matrix.asset }}"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KC_PASS="$(openssl rand -hex 24)"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/api_key.p8"
+          trap 'security delete-keychain "$KEYCHAIN" 2>/dev/null || true; rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/api_key.p8"' EXIT
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          codesign --force --timestamp --options runtime \
+            --keychain "$KEYCHAIN" --sign "$MACOS_SIGN_IDENTITY" "$DEST"
+          codesign --verify --strict --verbose=2 "$DEST"
+          # Bare CLI binaries cannot be stapled; Gatekeeper checks the
+          # notarisation ticket online on first run.
+          ditto -c -k --keepParent "$DEST" "$RUNNER_TEMP/notarise.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarise.zip" \
+            --key "$RUNNER_TEMP/api_key.p8" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" --wait --timeout 30m
+
+      - name: Checksum (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="${{ matrix.asset }}"
           sha256sum "$DEST" | tee "${DEST}.sha256"
 
       - name: Package (Windows)
