@@ -60,17 +60,179 @@ impl Totals {
     }
 }
 
+// These colors are shared by the donut, stacked bars and legends. Labels and
+// numeric totals also carry meaning when printed without background colors.
+const COLORS: [&str; 3] = ["#2463a6", "#6e46a2", "#b46a16"];
+const COVERAGE: [&str; 3] = ["Image-level", "Agent in estimate", "Excluded"];
+
+fn coverage_values(t: &Totals) -> [f64; 3] {
+    [t.image / TB, t.agent / TB, t.excluded / TB]
+}
+
+fn coverage_legend(out: &mut String) {
+    out.push_str("<p class=legend>");
+    for (label, color) in COVERAGE.iter().zip(COLORS) {
+        write!(out, "<span style=\"color:{color}\">■ {label}</span>").unwrap();
+    }
+    out.push_str("</p>");
+}
+
+fn coverage_donut(out: &mut String, total: &Totals) {
+    let values = coverage_values(total);
+    let sum: f64 = values.iter().sum();
+    out.push_str("<svg class=donut viewBox=\"0 0 760 260\" role=img aria-label=\"Coverage donut\"><title>Coverage split — TB</title><circle cx=130 cy=130 r=88 fill=none stroke=\"#e4ebf2\" stroke-width=\"32\"/>");
+    let circumference = std::f64::consts::TAU * 88.0;
+    let mut offset = 0.0;
+    for ((label, value), color) in COVERAGE.iter().zip(values).zip(COLORS) {
+        if value > 0.0 && sum > 0.0 {
+            let length = value / sum * circumference;
+            write!(out, "<circle cx=130 cy=130 r=88 fill=none stroke=\"{color}\" stroke-width=32 stroke-dasharray=\"{length:.4} {circumference:.4}\" stroke-dashoffset=\"{offset:.4}\" transform=\"rotate(-90 130 130)\"><title>{label}: {value:.2} TB</title></circle>").unwrap();
+            offset -= length;
+        }
+    }
+    write!(out, "<text x=130 y=126 text-anchor=middle class=donut-total>{sum:.2}</text><text x=130 y=151 text-anchor=middle>TB coverage</text>").unwrap();
+    for (i, ((label, value), color)) in COVERAGE.iter().zip(values).zip(COLORS).enumerate() {
+        let y = 75 + i * 58;
+        write!(out, "<rect x=280 y=\"{}\" width=14 height=14 rx=3 fill=\"{color}\"/><text x=308 y=\"{y}\">{label}: {value:.2} TB</text>", y - 12).unwrap();
+    }
+    out.push_str("</svg>");
+    if sum == 0.0 {
+        out.push_str("<p>No capacity to chart.</p>");
+    }
+}
+
+/// Deterministic descending ranking; all omitted clusters contribute to Other.
+fn capacity_rows(groups: &BTreeMap<Vec<String>, Totals>, limit: usize) -> Vec<(String, [f64; 3])> {
+    let mut ranked: Vec<_> = groups.iter().collect();
+    ranked.sort_by(|(ka, a), (kb, b)| {
+        let sum = |t: &Totals| t.image + t.agent + t.excluded;
+        sum(b).total_cmp(&sum(a)).then_with(|| ka.cmp(kb))
+    });
+    let mut result = Vec::new();
+    let mut other = Totals::default();
+    for (i, (names, total)) in ranked.into_iter().enumerate() {
+        if i < limit {
+            // Put the cluster first so long vCenter names do not hide it.
+            let label = names
+                .iter()
+                .rev()
+                .map(|s| if s.is_empty() { "(unknown)" } else { s })
+                .collect::<Vec<_>>()
+                .join(" / ");
+            result.push((label, coverage_values(total)));
+        } else {
+            other.add(total);
+        }
+    }
+    if groups.len() > limit {
+        result.push(("Other".into(), coverage_values(&other)));
+    }
+    result
+}
+
+/// Every row has a full tooltip and a numeric total; shortened visible labels
+/// cannot clip adjacent bars. Only escaped text is derived from inventory.
+/// Singular "VM" for a count of exactly one; TB otherwise unchanged.
+fn unit_for(counts: bool, value: f64) -> &'static str {
+    match (counts, value.round() == 1.0) {
+        (true, true) => "VM",
+        (true, false) => "VMs",
+        (false, _) => "TB",
+    }
+}
+
+fn bar_chart(out: &mut String, title: &str, rows: &[(String, [f64; 3])], counts: bool) {
+    let max = rows
+        .iter()
+        .map(|(_, v)| v.iter().sum::<f64>())
+        .fold(0.0, f64::max);
+    // VM axes use whole counts, even when there is just one actionable VM.
+    let max = if counts && max > 0.0 {
+        (max / 4.0).ceil() * 4.0
+    } else {
+        max
+    };
+    let height = 56 + rows.len() * 46;
+    let unit = if counts { "VMs" } else { "TB" };
+    write!(out, "<svg class=bars viewBox=\"0 0 1000 {height}\" role=img aria-label=\"{}\"><title>{} — {unit}</title>", escape(title), escape(title)).unwrap();
+    for tick in 0..=4 {
+        let x = 350 + tick * 140;
+        let value = max * tick as f64 / 4.0;
+        let text = if counts {
+            format!("{value:.0}")
+        } else {
+            format!("{value:.2}")
+        };
+        write!(out, "<path d=\"M{x} 30V{}\" stroke=\"#dce4ed\"/><text x=\"{x}\" y=20 text-anchor=middle class=axis>{text}</text>", height - 10).unwrap();
+    }
+    for (i, (label, values)) in rows.iter().enumerate() {
+        let y = 42 + i * 46;
+        let short = if label.chars().count() > 39 {
+            format!("{}…", label.chars().take(38).collect::<String>())
+        } else {
+            label.clone()
+        };
+        write!(
+            out,
+            "<text x=330 y=\"{}\" text-anchor=end><title>{}</title>{}</text>",
+            y + 18,
+            escape(label),
+            escape(&short)
+        )
+        .unwrap();
+        let mut x = 350.0;
+        for (j, value) in values.iter().enumerate() {
+            let width = if max > 0.0 { value / max * 560.0 } else { 0.0 };
+            let category = if counts { "Actions" } else { COVERAGE[j] };
+            let number = if counts {
+                format!("{value:.0}")
+            } else {
+                format!("{value:.2}")
+            };
+            let unit = unit_for(counts, *value);
+            write!(out, "<rect x=\"{x:.4}\" y=\"{y}\" width=\"{width:.4}\" height=28 fill=\"{}\"><title>{} — {category}: {number} {unit}</title></rect>", COLORS[j], escape(label)).unwrap();
+            x += width;
+        }
+        let sum: f64 = values.iter().sum();
+        let number = if counts {
+            format!("{sum:.0}")
+        } else {
+            format!("{sum:.2}")
+        };
+        let unit = unit_for(counts, sum);
+        write!(
+            out,
+            "<text x=\"{:.4}\" y=\"{}\">{number} {unit}</text>",
+            x + 10.0,
+            y + 19
+        )
+        .unwrap();
+    }
+    out.push_str("</svg>");
+    if max == 0.0 {
+        out.push_str(if counts {
+            "<p>No actions to chart.</p>"
+        } else {
+            "<p>No capacity to chart.</p>"
+        });
+    }
+}
+
 fn capacity_table(
     out: &mut String,
     title: &str,
     groups: &BTreeMap<Vec<String>, Totals>,
     labels: &[&str],
 ) {
-    write!(
-        out,
-        "<section><h2>{title}</h2><div class=scroll><table><thead><tr>"
-    )
-    .unwrap();
+    write!(out, "<section><h2>{title}</h2>").unwrap();
+    out.push_str("<p class=note>Coverage capacity (not provisioned inventory): image-level + agent in estimate + excluded non-VADP. Hover for segment values; complete inventory totals are in the table below.</p>");
+    let limit = if labels.len() > 1 { 15 } else { usize::MAX };
+    if groups.len() > limit {
+        out.push_str("<p class=note>Top 15 clusters by coverage capacity; remaining clusters combined as Other.</p>");
+    }
+    bar_chart(out, title, &capacity_rows(groups, limit), false);
+    coverage_legend(out);
+    out.push_str("<div class=scroll><table><thead><tr>");
     for label in labels {
         write!(out, "<th scope=col>{label}</th>").unwrap();
     }
@@ -199,31 +361,7 @@ pub fn write(
         if cli.keep_rdm { "kept" } else { "excluded" }, if cli.keep_independent { "kept" } else { "excluded" },
         if cli.do_not_use_vpartition { "disabled" } else { "enabled" }).unwrap();
     out.push_str("</section><section><h2>Coverage split</h2><p>Image-level and agent values are included in the estimate. Excluded storage still needs an agent or another protection method. Shared storage is counted once by the sizing logic. Keeping a disk does not make it snapshot-backupable.</p>");
-    let sum = total.image + total.agent + total.excluded;
-    out.push_str("<svg viewBox=\"0 0 100 10\" role=img aria-label=\"Coverage split: image-level, agent in estimate, excluded\"><title>Coverage split</title>");
-    let mut x = 0.0;
-    for (value, color) in [
-        (total.image, "#2463a6"),
-        (total.agent, "#6e46a2"),
-        (total.excluded, "#b46a16"),
-    ] {
-        let width = if sum > 0.0 {
-            (value / sum * 100.0).clamp(0.0, 100.0)
-        } else {
-            0.0
-        };
-        write!(
-            out,
-            "<rect x=\"{x:.4}\" y=\"0\" width=\"{width:.4}\" height=\"10\" fill=\"{color}\"/>"
-        )
-        .unwrap();
-        x += width;
-    }
-    out.push_str("</svg>");
-    write!(out, "<p class=legend><span>■ Image-level: {:.2} TB</span><span>◆ Agent in estimate: {:.2} TB</span><span>▲ Excluded: {:.2} TB</span></p>",total.image/TB,total.agent/TB,total.excluded/TB).unwrap();
-    if sum == 0.0 {
-        out.push_str("<p>No capacity to chart.</p>");
-    }
+    coverage_donut(&mut out, &total);
     out.push_str("</section>");
     capacity_table(&mut out, "Capacity by vCenter", &centers, &["vCenter"]);
     capacity_table(
@@ -232,6 +370,21 @@ pub fn write(
         &clusters,
         &["vCenter", "Datacenter", "Cluster"],
     );
+    out.push_str("<section><h2>Action categories</h2><p>VM counts by highest-priority action category. Each actionable VM is counted once; VMs without actions are not shown.</p>");
+    let mut counts = [0_usize; 3];
+    for row in rows {
+        let fields = actions::fields(row)?;
+        if let Some(i) = actions::CATEGORIES.iter().position(|c| *c == fields[0]) {
+            counts[i] += 1;
+        }
+    }
+    let action_counts: Vec<_> = actions::CATEGORIES
+        .iter()
+        .zip(counts)
+        .map(|(c, n)| (c.to_string(), [n as f64, 0.0, 0.0]))
+        .collect();
+    bar_chart(&mut out, "Action categories", &action_counts, true);
+    out.push_str("</section>");
     out.push_str("<section><h2>Customer actions</h2><p>One row per VM needing attention, using the same categories and recommendations as --action-report. No actions does not guarantee backup readiness.</p><div class=controls><label>Filter <input id=filter type=search placeholder=\"VM, cluster or issue\"></label><label>Category <select id=category><option value=\"\">All categories</option>");
     for c in actions::CATEGORIES {
         write!(out, "<option>{}</option>", escape(c)).unwrap();
@@ -268,7 +421,7 @@ const HEADER: &str = r#"<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>rvsum — Backup coverage &amp; capacity</title><style>
-:root{font:16px system-ui,sans-serif;color:#182c42;background:#edf2f7}body{margin:0}header,main,footer{max-width:1400px;margin:auto;padding:2rem}header{background:#132c45;color:#fff}h1{font-size:2.5rem;margin:.5rem 0}h2{margin-top:0;font-size:1.4rem}.eyebrow{letter-spacing:.15em;font-size:.75rem;color:#b9d9f7}section{background:white;border:1px solid #dce4ed;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 2px 8px #152f4710}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}article{background:#f0f5fa;padding:1.2rem;border-radius:8px}article strong{display:block;font-size:2rem;font-variant-numeric:tabular-nums}article span{font-size:.85rem}.note,footer{font-size:.85rem;color:#52667a;line-height:1.5}p{line-height:1.5}svg{width:100%;height:72px;display:block}.legend{display:flex;flex-wrap:wrap;gap:1.5rem}.legend span:nth-child(1){color:#2463a6}.legend span:nth-child(2){color:#6e46a2}.legend span:nth-child(3){color:#9a570c}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{padding:.7rem;text-align:left;border-bottom:1px solid #dce4ed;vertical-align:top;min-width:100px}th{background:#edf2f7;position:sticky;top:0}tbody tr:nth-child(even){background:#f8fafc}td{white-space:pre-wrap;overflow-wrap:anywhere}button{border:0;background:none;font:inherit;font-weight:700;color:inherit;cursor:pointer;text-align:left}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #2463a6}th[aria-sort=ascending] button:after{content:' ↑'}th[aria-sort=descending] button:after{content:' ↓'}.controls{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}label{display:flex;align-items:center;gap:.5rem}input,select{padding:.6rem;border:1px solid #9cafbf;border-radius:6px;font:inherit;max-width:100%}[hidden]{display:none!important}@media(max-width:600px){header,main,footer{padding:1rem}section{padding:1rem}h1{font-size:2rem}}@media print{body{background:white}header{color:#182c42;background:white}.controls,button:after{display:none}section{box-shadow:none;break-inside:avoid}.scroll{overflow:visible}table{font-size:8pt}td,th{min-width:0;padding:3pt}#actions{table-layout:fixed}button{padding:0}header,main,footer{padding:0}}
+:root{font:16px system-ui,sans-serif;color:#182c42;background:#edf2f7}body{margin:0}header,main,footer{max-width:1400px;margin:auto;padding:2rem}header{background:#132c45;color:#fff}h1{font-size:2.5rem;margin:.5rem 0}h2{margin-top:0;font-size:1.4rem}.eyebrow{letter-spacing:.15em;font-size:.75rem;color:#b9d9f7}section{background:white;border:1px solid #dce4ed;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 2px 8px #152f4710}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}article{background:#f0f5fa;padding:1.2rem;border-radius:8px}article strong{display:block;font-size:2rem;font-variant-numeric:tabular-nums}article span{font-size:.85rem}.note,footer{font-size:.85rem;color:#52667a;line-height:1.5}p{line-height:1.5}svg{width:100%;height:auto;display:block;color:#182c42}svg text{fill:currentColor;font:14px system-ui,sans-serif}.donut{max-width:900px;margin:auto}.donut text{font-size:18px}.donut .donut-total{font-size:30px;font-weight:700}.axis{fill:#52667a;font-size:12px}.bars{margin:1rem 0;break-inside:avoid}.legend{display:flex;flex-wrap:wrap;gap:1.5rem}.legend span:nth-child(1){color:#2463a6}.legend span:nth-child(2){color:#6e46a2}.legend span:nth-child(3){color:#9a570c}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{padding:.7rem;text-align:left;border-bottom:1px solid #dce4ed;vertical-align:top;min-width:100px}th{background:#edf2f7;position:sticky;top:0}tbody tr:nth-child(even){background:#f8fafc}td{white-space:pre-wrap;overflow-wrap:anywhere}button{border:0;background:none;font:inherit;font-weight:700;color:inherit;cursor:pointer;text-align:left}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #2463a6}th[aria-sort=ascending] button:after{content:' ↑'}th[aria-sort=descending] button:after{content:' ↓'}.controls{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}label{display:flex;align-items:center;gap:.5rem}input,select{padding:.6rem;border:1px solid #9cafbf;border-radius:6px;font:inherit;max-width:100%}[hidden]{display:none!important}@media(max-width:600px){header,main,footer{padding:1rem}section{padding:1rem}h1{font-size:2rem}}@media print{svg{print-color-adjust:exact;-webkit-print-color-adjust:exact}body{background:white}header{color:#182c42;background:white}.controls,button:after{display:none}section{box-shadow:none;break-inside:avoid}.scroll{overflow:visible}table{font-size:8pt}td,th{min-width:0;padding:3pt}#actions{table-layout:fixed}button{padding:0}header,main,footer{padding:0}}
 </style></head><body>"#;
 
 const SCRIPT: &str = r#"<script>
@@ -286,5 +439,92 @@ mod tests {
     #[test]
     fn escapes_all_html_delimiters() {
         assert_eq!(escape("<&>\"'"), "&lt;&amp;&gt;&quot;&#39;");
+    }
+    #[test]
+    fn donut_values_include_all_categories_and_zero_is_finite() {
+        let mut out = String::new();
+        coverage_donut(
+            &mut out,
+            &Totals {
+                image: TB,
+                agent: 2.0 * TB,
+                excluded: 3.0 * TB,
+                ..Totals::default()
+            },
+        );
+        assert!(out.contains("Image-level: 1.00 TB"));
+        assert!(out.contains("Agent in estimate: 2.00 TB"));
+        assert!(out.contains("Excluded: 3.00 TB"));
+        assert!(out.contains(">6.00</text>"));
+        assert!(out.contains("stroke-dasharray=\"92.1534 552.9203\""));
+        out.clear();
+        coverage_donut(&mut out, &Totals::default());
+        assert!(out.contains("No capacity to chart."));
+        assert!(!out.contains("NaN") && !out.contains("inf"));
+    }
+
+    #[test]
+    fn top_clusters_other_preserves_each_coverage_category_and_ties() {
+        let groups = (0..18)
+            .map(|i| {
+                (
+                    vec![format!("cluster-{i:02}")],
+                    Totals {
+                        image: TB,
+                        agent: 2.0 * TB,
+                        excluded: 3.0 * TB,
+                        ..Totals::default()
+                    },
+                )
+            })
+            .collect();
+        let rows = capacity_rows(&groups, 15);
+        assert_eq!(rows.len(), 16);
+        assert_eq!(rows[0].0, "cluster-00");
+        assert_eq!(rows[14].0, "cluster-14");
+        assert_eq!(rows[15], ("Other".into(), [3.0, 6.0, 9.0]));
+        let all = capacity_rows(&groups, usize::MAX);
+        assert_eq!(all.len(), 18);
+        assert_eq!(
+            all.iter().map(|(_, v)| v.iter().sum::<f64>()).sum::<f64>(),
+            108.0
+        );
+    }
+
+    #[test]
+    fn bars_escape_titles_labels_and_render_exact_values() {
+        let mut out = String::new();
+        bar_chart(
+            &mut out,
+            "<capacity>",
+            &[("<&>\"'".into(), [1.0, 2.0, 3.0])],
+            false,
+        );
+        assert!(out.contains("aria-label=\"&lt;capacity&gt;\""));
+        assert!(out.contains("&lt;&amp;&gt;&quot;&#39; — Agent in estimate: 2.00 TB"));
+        assert!(out.contains("width=\"186.6667\""));
+        assert!(out.contains(">6.00 TB</text>"));
+        assert!(!out.contains("<&>"));
+        out.clear();
+        bar_chart(&mut out, "Empty", &[], false);
+        assert!(out.contains("No capacity to chart."));
+        assert!(!out.contains("NaN"));
+        out.clear();
+        bar_chart(
+            &mut out,
+            "Actions",
+            &[("Category".into(), [7.0, 0.0, 0.0])],
+            true,
+        );
+        assert!(out.contains("Category — Actions: 7 VMs"));
+        assert!(out.contains(">7 VMs</text>"));
+    }
+
+    #[test]
+    fn vm_unit_is_singular_for_one() {
+        assert_eq!(unit_for(true, 1.0), "VM");
+        assert_eq!(unit_for(true, 2.0), "VMs");
+        assert_eq!(unit_for(true, 0.0), "VMs");
+        assert_eq!(unit_for(false, 1.0), "TB");
     }
 }

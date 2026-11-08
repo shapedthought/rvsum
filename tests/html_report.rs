@@ -101,6 +101,13 @@ fn offline_report_sections_coverage_and_escaping() {
         "<!doctype html>",
         "At a glance",
         "Coverage split",
+        "aria-label=\"Coverage donut\"",
+        "aria-label=\"Capacity by cluster\"",
+        "aria-label=\"Capacity by vCenter\"",
+        "aria-label=\"Action categories\"",
+        "Cluster&quot;&#39; / DC&lt;&amp;&gt; / VC&lt;&amp;&gt; — Excluded: 1.00 TB",
+        "VC Second — Image-level: 0.50 TB",
+        "Not protected by image-level backup — Actions: 1 VM",
         "Capacity by cluster",
         "Capacity by vCenter",
         "Customer actions",
@@ -179,6 +186,9 @@ fn missing_metadata_and_empty_selection_are_explicit() {
     let html = fs::read_to_string(&output).unwrap();
     assert!(html.contains("No capacity to chart."));
     assert!(html.contains("No customer actions found"));
+    assert!(html.contains("No actions to chart."));
+    assert_eq!(html.matches("<svg ").count(), 4);
+    assert!(!html.contains("NaN"));
 }
 
 #[test]
