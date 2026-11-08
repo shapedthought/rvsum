@@ -9,6 +9,8 @@ pub enum MyError {
     EnumToFloat(String),
     #[error("Could not get position of column: {0}")]
     ColumnPosition(String),
+    #[error("Sheet is empty: {0}")]
+    EmptySheet(String),
     #[error("Error with excel file")]
     ExcelError(#[from] calamine::XlsxError),
     #[error("Error with vInfo sheet: {0}")]
