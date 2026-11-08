@@ -132,6 +132,15 @@ fn capacity_rows(groups: &BTreeMap<Vec<String>, Totals>, limit: usize) -> Vec<(S
 
 /// Every row has a full tooltip and a numeric total; shortened visible labels
 /// cannot clip adjacent bars. Only escaped text is derived from inventory.
+/// Singular "VM" for a count of exactly one; TB otherwise unchanged.
+fn unit_for(counts: bool, value: f64) -> &'static str {
+    match (counts, value.round() == 1.0) {
+        (true, true) => "VM",
+        (true, false) => "VMs",
+        (false, _) => "TB",
+    }
+}
+
 fn bar_chart(out: &mut String, title: &str, rows: &[(String, [f64; 3])], counts: bool) {
     let max = rows
         .iter()
@@ -180,6 +189,7 @@ fn bar_chart(out: &mut String, title: &str, rows: &[(String, [f64; 3])], counts:
             } else {
                 format!("{value:.2}")
             };
+            let unit = unit_for(counts, *value);
             write!(out, "<rect x=\"{x:.4}\" y=\"{y}\" width=\"{width:.4}\" height=28 fill=\"{}\"><title>{} — {category}: {number} {unit}</title></rect>", COLORS[j], escape(label)).unwrap();
             x += width;
         }
@@ -189,6 +199,7 @@ fn bar_chart(out: &mut String, title: &str, rows: &[(String, [f64; 3])], counts:
         } else {
             format!("{sum:.2}")
         };
+        let unit = unit_for(counts, sum);
         write!(
             out,
             "<text x=\"{:.4}\" y=\"{}\">{number} {unit}</text>",
@@ -507,5 +518,13 @@ mod tests {
         );
         assert!(out.contains("Category — Actions: 7 VMs"));
         assert!(out.contains(">7 VMs</text>"));
+    }
+
+    #[test]
+    fn vm_unit_is_singular_for_one() {
+        assert_eq!(unit_for(true, 1.0), "VM");
+        assert_eq!(unit_for(true, 2.0), "VMs");
+        assert_eq!(unit_for(true, 0.0), "VMs");
+        assert_eq!(unit_for(false, 1.0), "TB");
     }
 }

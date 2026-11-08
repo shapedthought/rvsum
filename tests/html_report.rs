@@ -107,7 +107,7 @@ fn offline_report_sections_coverage_and_escaping() {
         "aria-label=\"Action categories\"",
         "Cluster&quot;&#39; / DC&lt;&amp;&gt; / VC&lt;&amp;&gt; — Excluded: 1.00 TB",
         "VC Second — Image-level: 0.50 TB",
-        "Not protected by image-level backup — Actions: 1 VMs",
+        "Not protected by image-level backup — Actions: 1 VM",
         "Capacity by cluster",
         "Capacity by vCenter",
         "Customer actions",
