@@ -338,6 +338,90 @@ def build_coverage(path):
     wb.save(path)
 
 
+def build_anonymise(path):
+    """`rvsum anonymise` fixture: every name below is invented and must not survive
+    anonymisation (tests/anonymise.rs lists them in SECRETS). Includes a custom
+    attribute header, datastore paths, an ISO path in vCD, container mounts, a
+    licence key, vMetaData server, a date cell, and a multi-writer disk shared by
+    two VMs whose name order decides which VM is credited."""
+    import datetime
+    G = 1024
+    vms = [("zulu-payroll-db", "u-zulu"), ("alpha-payroll-db", "u-alpha"),
+           ("kube-node-secret", "u-kube"), ("Legacy-HR-App", "u-hr")]
+    wb = Workbook()
+    info = wb.active
+    info.title = "vInfo"
+    info.append(["VM", "Powerstate", "DNS Name", "Primary IP Address", "In Use MiB",
+                 "Provisioned MiB", "Path", "Annotation", "Owner-Team-Acme", "Datacenter",
+                 "Cluster", "Host", "OS according to the configuration file", "Tools",
+                 "Creation date", "VM UUID", "VI SDK Server", "VI SDK UUID"])
+    for i, (vm, u) in enumerate(vms):
+        info.append([vm, "poweredOn", f"{vm}.corp.acme-secret.example", f"10.66.0.{i + 1}",
+                     (300 + 100 * i) * G, (400 + 100 * i) * G,
+                     f"[gold-datastore-acme] {vm}/{vm}.vmx", f"Owner Jane Doe-{i}",
+                     "Team Rocket-Acme", "DC-Acme-Dubai", "CL-Acme-Prod", "esx-acme-01.corp",
+                     "Microsoft Windows Server 2022 (64-bit)", "toolsOk",
+                     datetime.datetime(2024, 1, 2, 3, 4, 5), u.upper(),
+                     "vcenter-acme.corp", "vc-uuid-acme"])
+
+    disk = wb.create_sheet("vDisk")
+    disk.append(["VM", "Powerstate", "Disk", "Disk Key", "Disk UUID", "Disk Path",
+                 "Capacity MiB", "Raw", "Disk Mode", "Sharing mode", "Controller", "Label",
+                 "Shared Bus", "Raw LUN ID", "Raw Comp. Mode", "Internal Sort Column",
+                 "Owner-Team-Acme", "Datacenter", "Cluster", "VM UUID", "VI SDK Server"])
+    for vm, u in vms:
+        disk.append([vm, "poweredOn", "Hard disk 1", 2000, f"6000c29-{vm}", f"[gold-datastore-acme] {vm}/{vm}.vmdk",
+                     200 * G, False, "persistent", "sharingNone", "LSI Logic SAS",
+                     "SCSI controller 0", "noSharing", "", "", f"{vm}-sort-2000",
+                     "Team Rocket-Acme", "DC-Acme-Dubai", "CL-Acme-Prod", u, "vcenter-acme.corp"])
+    for vm, u in vms[:2]:
+        disk.append([vm, "poweredOn", "Hard disk 2", 2001, "6000C29-SHARED-PAYROLL",
+                     "[silver-datastore-acme] zulu-payroll-db/shared_payroll.vmdk", 500 * G,
+                     False, "persistent", "sharingMultiWriter", "LSI Logic SAS",
+                     "SCSI controller 1", "noSharing", "", "", f"{vm}-sort-2001",
+                     "Team Rocket-Acme", "DC-Acme-Dubai", "CL-Acme-Prod", u.upper(),
+                     "VCENTER-ACME.corp"])
+    disk.append(["Legacy-HR-App", "poweredOn", "Hard disk 3", 2002, "", "", 100 * G, True,
+                 "persistent", "sharingNone", "LSI Logic SAS", "SCSI controller 0",
+                 "physicalSharing", "naa.600acme0001", "physicalMode", "hr-sort-2002",
+                 "", "DC-Acme-Dubai", "CL-Acme-Prod", "u-hr", "vcenter-acme.corp"])
+
+    part = wb.create_sheet("vPartition")
+    part.append(["VM", "Powerstate", "Disk Key", "Disk", "Capacity MiB", "Consumed MiB",
+                 "Free MiB", "Free %", "VM UUID"])
+    part.append(["zulu-payroll-db", "poweredOn", "2000", "C:\\", 200 * G, 150 * G, 50 * G, 25, "u-zulu"])
+    part.append(["zulu-payroll-db", "poweredOn", "2001", "D:\\PayrollData-Acme", 500 * G, 100 * G, 400 * G, 80, "u-zulu"])
+    part.append(["alpha-payroll-db", "poweredOn", "2000", "/", 200 * G, 120 * G, 80 * G, 40, "u-alpha"])
+    part.append(["alpha-payroll-db", "poweredOn", "2001", "/u01/payroll-acme", 500 * G, 450 * G, 50 * G, 10, "u-alpha"])
+    part.append(["kube-node-secret", "poweredOn", "2000", "/", 200 * G, 60 * G, 140 * G, 70, "u-kube"])
+    for i in range(12):
+        part.append(["kube-node-secret", "poweredOn", "", f"/var/lib/kubelet/pods/acme-pod-{i}/volumes",
+                     900 * G, 10 * G, 890 * G, 99, "u-kube"])
+    part.append(["Legacy-HR-App", "poweredOn", "", "/mnt/acme-iscsi-hr", 2000 * G, 1500 * G, 500 * G, 25, "u-hr"])
+
+    cd = wb.create_sheet("vCD")
+    cd.append(["VM", "Device Node", "Connected", "Device Type", "VM UUID"])
+    cd.append(["Legacy-HR-App", "CD/DVD drive 1", False,
+               "ISO [gold-datastore-acme] isos/acme-hr-install.iso", "u-hr"])
+
+    ds = wb.create_sheet("vDatastore")
+    ds.append(["Name", "Type", "Capacity MiB", "Free MiB", "URL", "Hosts", "Cluster name"])
+    ds.append(["gold-datastore-acme", "VMFS", 10000 * G, 4000 * G,
+               "ds:///vmfs/volumes/acme-gold/", "esx-acme-01.corp", "CL-Acme-Prod"])
+    ds.append(["silver-datastore-acme", "VMFS", 5000 * G, 1000 * G,
+               "ds:///vmfs/volumes/acme-silver/", "esx-acme-01.corp", "CL-Acme-Prod"])
+
+    lic = wb.create_sheet("vLicense")
+    lic.append(["Name", "Key", "Labels", "Total", "Used", "Features", "VI SDK Server"])
+    lic.append(["VMware vSphere 8 Enterprise Plus", "ACME1-SECRET-LICENCE-KEY", "acme-label",
+                64, 48, "vMotion", "vcenter-acme.corp"])
+
+    meta = wb.create_sheet("vMetaData")
+    meta.append(["RVTools major version", "RVTools version", "xlsx creation datetime", "Server"])
+    meta.append([4, "4.7.1", "2026-01-01 10:00:00", "vcenter-acme.corp"])
+    wb.save(path)
+
+
 here = Path(__file__).parent
 build_baseline(here / "regression_baseline.xlsx")
 build_baseline(here / "regression_no_part_powerstate.xlsx", part_powerstate=False)
@@ -351,3 +435,4 @@ build_no_uuid_duplicate(here / "regression_no_uuid_dup.xlsx")
 build_anon_filter(here / "regression_anon_filter.xlsx")
 build_coverage(here / "regression_coverage.xlsx")
 print("wrote uuid_a, uuid_b, no_uuid_dup, anon_filter, baseline, no_part_powerstate, disks, disks2, disk_summary_a, disk_summary_b")
+build_anonymise(here / "regression_anonymise.xlsx")

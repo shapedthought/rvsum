@@ -8,7 +8,7 @@ rvsum reads the `vInfo`, optional `vPartition` and optional `vDisk` sheets in [R
 - Several files or folders in one run, with optional recursive discovery.
 - Powered-off VM and name filters, site roll-ups, and VADP-oriented disk diagnostics.
 
-[Install](#install) · [Quick start](#quick-start) · [Capacity rules](#how-capacity-is-calculated) · [Why disks are excluded](#why-some-disks-are-excluded-in-plain-english) · [Outputs](#output-formats) · [Podman](#podman-workflow) · [Flags](#full-flag-reference) · [Migration](#migrating-from-rvtools2vse)
+[Install](#install) · [Quick start](#quick-start) · [Capacity rules](#how-capacity-is-calculated) · [Why disks are excluded](#why-some-disks-are-excluded-in-plain-english) · [Outputs](#output-formats) · [Anonymise](#anonymise-an-export-before-sharing-it) · [Podman](#podman-workflow) · [Flags](#full-flag-reference) · [Migration](#migrating-from-rvtools2vse)
 
 > This is an **estimate of source data**, not a backup repository sizing calculator or a guarantee of backup support. It does not model retention, change rate, compression or deduplication for backup storage. Review the [capacity rules](#how-capacity-is-calculated) and [limitations](#known-limitations) before using the totals.
 
@@ -630,7 +630,7 @@ The old Veeam Size Estimator (VSE) is defunct, but its export remains available 
 
 ## Known limitations
 
-- **Anonymization scope:** `--anonymize` hashes datacenter, cluster and VM names in the output, not every workbook/exception field (for example disk labels); do not treat it as a complete data-sanitization or security feature.
+- **Anonymization scope:** `--anonymize` hashes datacenter, cluster and VM names in the output, not every workbook/exception field (for example disk labels); do not treat it as a complete data-sanitization or security feature. To share the workbook itself, use [`rvsum anonymise`](#anonymise-an-export-before-sharing-it).
 - **Overlapping exports:** the same VM in two input files is counted twice. It is flagged as `duplicate_vm_name` with `same_uuid_in_multiple_records_check_overlapping_exports` when UUIDs are present. Duplicate *paths* are removed, not duplicate inventory records. Exports without UUID columns join by name, which is ambiguous when names repeat.
 - **Guest data quality:** missing/stale Tools or vPartition rows can make the vInfo fallback overestimate guest data. Missing vDisk metadata can prevent exclusions/deduplication. Partial exclusions and shared disks cannot be allocated precisely without usable guest data.
 - **Shared disks without UUIDs:** the disk-label-plus-size fallback is ambiguous and can merge unrelated disks. Shared allocation is deterministic by VM name, not by actual ownership or guest usage.
@@ -732,6 +732,67 @@ with filters and frozen headers. CSV/JSON/Markdown are one table/list sorted by
 priority, placement and VM. stderr prints category VM counts without polluting
 stdout. Empty reports still contain headers (or an empty JSON array).
 
+
+## Anonymise an export before sharing it
+
+`rvsum anonymise` writes a copy of an RVTools workbook with the names and
+addresses replaced by meaningless tokens. Use it before you email an export to a
+colleague, attach it to a support case or keep it as a test file. The original is
+never modified, and rvsum gives **exactly the same sizing numbers** for the copy.
+
+```sh
+rvsum anonymise -i export.xlsx -o export_anon.xlsx
+
+# Several exports at once into a folder (writes NAME_anon.xlsx for each).
+rvsum anonymise -i site1.xlsx,site2.xlsx -o ./anon
+
+# Same tokens every time (e.g. a monthly export) and a private lookup table.
+rvsum anonymise -i export.xlsx -o export_anon.xlsx --salt-file ~/.rvsum-salt \
+  --mapping-file ~/private/export_map.csv
+```
+
+In a container (the copy lands next to the original):
+
+```sh
+podman run --rm -v "$PWD":/data ghcr.io/shapedthought/rvsum:latest \
+  anonymise -i /data/export.xlsx -o /data/export_anon.xlsx
+```
+
+**What it hides.** VM, host, cluster, datacenter, datastore, folder, resource
+pool, vApp and network names; DNS names, IP and MAC addresses; annotations;
+vCenter names and every UUID / object ID; file and datastore paths (each part of
+`[datastore] folder/file.vmdk` is replaced, the `.vmdk` extension is kept);
+guest mount points such as `/u01/payroll` (generic ones like `/`, `C:\` and
+`/boot` stay); serial numbers, DNS/NTP servers, certificates and licence labels.
+Licence keys are removed. **Custom attributes** (the extra columns your vCenter
+adds, such as owner or application) are hidden twice: the values are replaced
+and the column headers become `Attr_1`, `Attr_2`, ...
+
+**What it keeps.** Every number (capacities, counts, sizes) and date, power
+state, OS type, versions, VMware Tools status, disk mode, sharing mode, SCSI bus
+sharing, RDM mode, controller and "Hard disk N" labels. Sheet names, sheet order
+and standard headers are unchanged, so rvsum and Excel read the copy as normal.
+
+**How the tokens work.** The same name always becomes the same token across
+every sheet and file in one run (`anon-` plus 16 hex digits, from a salted
+HMAC-SHA-256). So joins, shared-disk de-duplication and grouping still work.
+VM names become `vm-0001`, `vm-0002`, ... in the **same alphabetical order as the
+real names**, because rvsum credits a disk shared by several VMs to the VM whose
+name sorts first; this keeps the numbers identical and reveals only the relative
+order of names. By default a random salt is used, so tokens differ on every run;
+pass `--salt` or `--salt-file` to reuse them. Columns rvsum does not recognise
+are hidden by default; use `--keep-column NAME` to keep one unchanged.
+
+**The mapping file is as sensitive as the export.** `--mapping-file map.csv`
+writes every `original,token` pair (created readable by you only on macOS/Linux).
+Never share it alongside the anonymised copy.
+
+**Limitations.** Anonymisation removes names, not shape: VM counts, sizes, OS mix
+and cluster layout are still visible, and someone who already knows an
+environment could recognise it. Free text kept in a "safe" column (for example a
+customised OS description) is not inspected. Cell formatting, comments, charts,
+hidden-sheet state and workbook properties are not copied. Review the copy
+before sharing it outside your organisation.
 
 ## Share an offline HTML report
 

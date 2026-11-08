@@ -5,8 +5,11 @@ use clap::Parser;
 use crate::summary::SummaryFormat;
 
 #[derive(Parser, Debug)]
-#[clap(author, version, about)]
+#[clap(author, version, about, args_conflicts_with_subcommands = true)]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// RvTools File(s)
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
     pub rvtools_files: Vec<PathBuf>,
@@ -157,4 +160,42 @@ pub struct Cli {
     /// Note: short `-v` is already `--vm-table-print`.
     #[clap(long, action, default_value_t = false)]
     pub verbose: bool,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Command {
+    /// Write an anonymised copy of RVTools workbook(s) that is safe to share and still sizes identically
+    #[command(visible_alias = "anonymize")]
+    Anonymise(AnonymiseArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AnonymiseArgs {
+    /// Input RVTools workbook(s); repeat or comma-separate for several files
+    #[arg(short, long, required = true, value_delimiter = ',', num_args = 1..)]
+    pub input: Vec<PathBuf>,
+
+    /// Output .xlsx (one input) or folder (one or more inputs; writes NAME_anon.xlsx)
+    #[arg(short, long)]
+    pub output: PathBuf,
+
+    /// Secret salt so tokens are reproducible across runs (random if omitted)
+    #[arg(long, conflicts_with = "salt_file")]
+    pub salt: Option<String>,
+
+    /// Read the salt from a file (first line, trimmed)
+    #[arg(long)]
+    pub salt_file: Option<PathBuf>,
+
+    /// Write original,token pairs to this CSV (SENSITIVE: keep it private; created mode 0600)
+    #[arg(long)]
+    pub mapping_file: Option<PathBuf>,
+
+    /// Keep this column's header and values unchanged (case-insensitive; repeatable)
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub keep_column: Vec<String>,
+
+    /// Overwrite existing output files
+    #[arg(long, action, default_value_t = false)]
+    pub force: bool,
 }

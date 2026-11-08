@@ -1,6 +1,7 @@
 //! rvsum: offline RVTools summaries for backup sizing.
 
 mod actions;
+mod anonymise;
 mod disk;
 mod excel;
 mod export;
@@ -31,6 +32,10 @@ use summary::SummaryFormat;
 
 pub fn run() -> Result<()> {
     let mut cli = Cli::parse();
+
+    if let Some(models::cli::Command::Anonymise(args)) = &cli.command {
+        return anonymise::run(args);
+    }
 
     if cli.dc_site_map_template {
         let mapper = vec![Mapper {
