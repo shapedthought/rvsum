@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `rvsum anonymise -i IN.xlsx -o OUT.xlsx` (alias `anonymize`): writes a shareable copy of RVTools workbook(s) with names, addresses, paths, UUIDs and custom attributes replaced by salted HMAC-SHA-256 tokens that are consistent across sheets and files, custom attribute headers renamed `Attr_N`, licence keys removed and numbers/dates/flags preserved, so rvsum sizes the copy identically. VM tokens keep the original name order (shared-disk ownership). Options: `--salt`/`--salt-file` for reproducible tokens (random by default), `--mapping-file` (mode 0600), `--keep-column`, `--force`; several inputs write `NAME_anon.xlsx` into an output folder. Existing top-level usage is unchanged.
 - `--html-report FILE`: one offline HTML file with inventory totals, coverage chart, vCenter/cluster capacity tables and filterable/sortable customer actions; supports `--anonymize` without external assets or new dependencies.
 - Optional vInfo provisioning and vCenter metadata for reports; cache schema 4 rebuilds old entries to preserve provisioning columns.
 
