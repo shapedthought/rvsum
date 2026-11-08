@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-08
+
 ### Added
 - Offline inline SVG charts in `--html-report`: coverage donut with TB legend,
   stacked capacity bars per vCenter and top 15 clusters plus Other, and action
   category VM counts. Existing detail tables remain below the charts. Responsive,
   print-friendly charts include escaped, anonymization-aware tooltip labels and
   explicit empty states, with no new dependencies.
+- README contents index at the top.
+
+### Fixed
+- HTML action chart labels a count of one as "1 VM".
 
 ## [1.5.0] - 2026-11-08
 
